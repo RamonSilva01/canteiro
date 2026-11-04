@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 // Roda a migration e o bootstrap num Postgres em memória (PGlite), com stubs
 // do que o Supabase já traz (auth, storage, papéis), e confere RLS e cálculos.
 // Uso: npm run test:db
-const migration = readFileSync(new URL("../migrations/0001_init.sql", import.meta.url), "utf8");
+const migracoes = ["0001_init.sql", "0002_importacao_notas.sql", "0003_obras_select_insert.sql"].map((f) =>
+  readFileSync(new URL(`../migrations/${f}`, import.meta.url), "utf8"));
 const bootstrap = readFileSync(new URL("../seed/bootstrap.sql", import.meta.url), "utf8");
 const db = new PGlite({ extensions: { pg_trgm, unaccent } });
 
@@ -14,6 +15,7 @@ const db = new PGlite({ extensions: { pg_trgm, unaccent } });
 await db.exec(`
   create schema extensions;
   create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
+  grant usage on schema extensions to anon, authenticated, service_role; -- igual ao Supabase
   create schema auth;
   create table auth.users (id uuid primary key, email text);
   create function auth.uid() returns uuid language sql stable as
@@ -29,8 +31,8 @@ await db.exec(`
     $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'),1)-1] $$;
 `);
 
-await db.exec(migration);
-console.log("OK migration aplicada");
+for (const m of migracoes) await db.exec(m);
+console.log("OK migrations aplicadas");
 
 const U = {
   adminA: "00000000-0000-0000-0000-00000000000a",
@@ -139,6 +141,25 @@ check("T4/D3 cliente vê os 3 confirmados (frete e desconto inclusos), não o pe
 await deveFalhar("T6 colaborador não vinculado não registra avanço", () => como(U.colab2, () => db.query(
   `insert into avancos_etapa (obra_id, etapa_id, percentual, registrado_por) values ($1,$2,70,$3)`,
   ["10000000-0000-0000-0000-000000000001", fund, U.colab2])));
+
+// Telas: o que as server actions fazem, com o usuário logado
+await como(U.colabA, () => db.query(
+  `insert into avancos_etapa (obra_id, etapa_id, percentual, data_referencia, registrado_por) values ($1,$2,65,app.hoje(),$3)
+   on conflict (etapa_id, data_referencia) do update set percentual = excluded.percentual, registrado_por = excluded.registrado_por`,
+  ["10000000-0000-0000-0000-000000000001", fund, U.colabA]));
+const av = await db.query(`select percentual_avanco from etapas where id = $1`, [fund]);
+check("Tela: reenvio do avanço no mesmo dia corrige o do dia", Number(av.rows[0].percentual_avanco) === 65);
+await como(U.colabA, () => db.query(
+  `insert into lancamentos (obra_id, etapa_id, data_competencia, descricao, valor_total, origem, status, criado_por) values
+   ('10000000-0000-0000-0000-000000000001',$1, app.hoje(),'Areia',300,'manual','confirmado',$2)`, [fund, U.colabA]));
+check("Tela: lançamento manual da equipe nasce confirmado", true);
+await deveFalhar("Tela: colaborador não cria subetapa nova", () => como(U.colabA, () => db.query(
+  `insert into subetapas (etapa_id, obra_id, nome) values ($1,'10000000-0000-0000-0000-000000000001','Brita')`, [fund])));
+const et = await como(U.adminA, () => db.query(
+  `insert into etapas (obra_id, nome, ordem) values ('10000000-0000-0000-0000-000000000001','Pintura',3) returning empresa_id`));
+check("Tela: admin cria etapa sem mandar empresa_id", et.rows[0].empresa_id === A);
+await deveFalhar("Tela: etapa com lançamento não pode ser removida", () => como(U.adminA, () => db.query(
+  `delete from etapas where id = $1`, [fund])));
 const t7 = await como(U.colabA, () => db.query(`update etapas set orcamento_referencia = 1 where id = $1`, [fund]));
 check("T7 colaborador não altera orçamento", t7.affectedRows === 0);
 await deveFalhar("T8 cliente não se promove a admin", () => como(U.cliA, () => db.query(
@@ -147,6 +168,50 @@ await deveFalhar("T9 vincular usuário a obra de outra empresa", () => db.query(
   `insert into obra_membros (obra_id, empresa_id, usuario_id) values ('10000000-0000-0000-0000-000000000003','${B}','${U.cliA}')`)
   .then(() => db.query(`select 1 from obra_membros m join perfis p on p.id = m.usuario_id where m.empresa_id <> p.empresa_id`))
   .then(r => { if (r.rows.length) throw new Error("vínculo cruzado existe (FK não cobre usuário)"); }));
+
+// Importação de nota (0002): sugestão por texto, por regra e por histórico exato
+const OBRA = "10000000-0000-0000-0000-000000000001";
+await db.exec(`insert into regras_classificacao (empresa_id, termo, etapa_nome) values ('${A}','tinta','Pintura')`);
+const notaBase = { origem: "xml_nfe", numero: "777", emit_cnpj: "11222333000144", emit_nome: "Casa do Construtor",
+  data_emissao: "2026-11-01T10:00:00-03:00", valor_frete: "50.00", valor_desconto: "10.00", valor_total: "1540.50" };
+const itens = [
+  { item_numero: 1, descricao: "AÇO CA-50", codigo_produto: "A50", ncm: "72142000", quantidade: "10", valor_unitario: "100", valor_total: "1000.00" },
+  { item_numero: 2, descricao: "TINTA ACRILICA BRANCA 18L", codigo_produto: "T18", ncm: "32091000", quantidade: "1", valor_unitario: "500", valor_total: "500.00" },
+];
+const imp = await como(U.colabA, () => db.query(`select importar_nota_fiscal($1, $2, $3) as id`,
+  [OBRA, JSON.stringify({ ...notaBase, chave_acesso: "1".repeat(44) }), JSON.stringify(itens)]));
+const notaId = imp.rows[0].id;
+const ls = await db.query(`select componente, descricao, valor_total, sugestao_etapa_id, sugestao_origem, sugestao_justificativa, status
+  from lancamentos where nota_fiscal_id = $1 order by componente, item_numero`, [notaId]);
+console.log("     nota importada:", ls.rows.map((l) => `${l.componente}:${l.valor_total}:${l.sugestao_origem}`).join(" | "));
+const pintura = (await db.query(`select id from etapas where nome = 'Pintura'`)).rows[0].id;
+const item = (n) => ls.rows.find((l) => l.componente === "item" && l.descricao.startsWith(n));
+check("Import: tudo nasce pendente", ls.rows.every((l) => l.status === "pendente"));
+check("Import: aço sugerido para Fundação pelo histórico de texto", item("AÇO").sugestao_etapa_id === fund);
+check("Import: tinta sugerida para Pintura pela regra", item("TINTA").sugestao_etapa_id === pintura && item("TINTA").sugestao_origem === "regra");
+check("Import D2: frete, desconto e ajuste viram lançamentos próprios",
+  ["frete", "desconto", "ajuste"].every((c) => ls.rows.some((l) => l.componente === c)));
+const cf = await como(U.adminA, () => db.query(`select diferenca from vw_notas_conferencia where nota_fiscal_id = $1`, [notaId]));
+check("Import D2: soma dos lançamentos fecha com o total da nota", Number(cf.rows[0].diferenca) === 0);
+await deveFalhar("Import: mesma chave de acesso é recusada", () => como(U.colabA, () => db.query(
+  `select importar_nota_fiscal($1, $2, $3)`, [OBRA, JSON.stringify({ ...notaBase, chave_acesso: "1".repeat(44) }), JSON.stringify(itens)])));
+await deveFalhar("Import: cliente não importa nota", () => como(U.cliA, () => db.query(
+  `select importar_nota_fiscal($1, $2, $3)`, [OBRA, JSON.stringify(notaBase), JSON.stringify(itens)])));
+// confirma a nota e importa outra do mesmo fornecedor: camada 1 (histórico exato)
+await como(U.adminA, () => db.query(`update lancamentos set etapa_id = coalesce(sugestao_etapa_id, $2), status = 'confirmado'
+  where nota_fiscal_id = $1`, [notaId, fund]));
+const imp2 = await como(U.adminA, () => db.query(`select importar_nota_fiscal($1, $2, $3) as id`,
+  [OBRA, JSON.stringify({ ...notaBase, numero: "778", valor_frete: null, valor_desconto: null, valor_total: "500.00" }),
+   JSON.stringify([{ ...itens[1], descricao: "TINTA X" }])]));
+const l2 = await db.query(`select sugestao_etapa_id, sugestao_confianca, sugestao_justificativa from lancamentos where nota_fiscal_id = $1`, [imp2.rows[0].id]);
+check("Import: mesmo fornecedor e produto usa histórico exato (0,95)",
+  l2.rows.length === 1 && l2.rows[0].sugestao_etapa_id === pintura && Number(l2.rows[0].sugestao_confianca) === 0.95, l2.rows[0]?.sugestao_justificativa);
+// Criar obra pela tela faz insert ... returning: a linha nova tem que passar na regra de leitura (0003)
+const criada = await como(U.adminA, () => db.query(`insert into obras (empresa_id, nome) values ('${A}', 'Obra nova') returning id`));
+check("Admin cria obra com returning", criada.rows.length === 1);
+await deveFalhar("Cliente não cria obra", () => como(U.cliA, () => db.query(`insert into obras (empresa_id, nome) values ('${A}', 'Obra do cliente') returning id`)));
+const vistas = await como(U.cliA, () => db.query(`select nome from obras order by nome`));
+check("Cliente continua vendo só a obra dele", vistas.rows.map(r => r.nome).join() === "Portobello", vistas.rows.map(r => r.nome).join());
 const anon = await db.exec(`set role anon;`).then(() => db.query(`select count(*) from obras`)).then(() => "leu", () => "negado").finally(() => db.exec("reset role"));
 check("anon não lê nada", anon === "negado");
 

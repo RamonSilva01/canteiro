@@ -38,7 +38,15 @@ export default async function LoginPage({
           />
         </label>
 
-        {erro && <p className="text-sm text-red-600">E-mail ou senha incorretos.</p>}
+        {erro && (
+          <p className="text-sm text-red-600">
+            {erro === "link"
+              ? "Este link de acesso expirou ou já foi usado. Peça um novo ao administrador da obra."
+              : erro === "desligado"
+                ? "Seu acesso foi desligado pelo administrador da obra."
+                : "E-mail ou senha incorretos."}
+          </p>
+        )}
 
         <button
           type="submit"
@@ -46,6 +54,7 @@ export default async function LoginPage({
         >
           Entrar
         </button>
+        <p className="text-xs text-stone-500 text-center">Esqueceu a senha? Peça um novo link de acesso ao administrador.</p>
       </form>
     </main>
   );
