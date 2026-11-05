@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { feedAtivo } from "@/lib/recursos";
 
 const ABAS = [
   { chave: "acompanhamento", rotulo: "Acompanhamento", caminho: "", equipe: false },
   { chave: "lancamentos", rotulo: "Lançamentos", caminho: "/lancamentos", equipe: false },
+  { chave: "feed", rotulo: "Feed", caminho: "/feed", equipe: false },
   { chave: "fotos", rotulo: "Fotos", caminho: "/fotos", equipe: false },
   { chave: "importar", rotulo: "Importar notas", caminho: "/importar", equipe: true },
   { chave: "conferir", rotulo: "Conferir", caminho: "/conferir", equipe: true },
@@ -48,7 +50,7 @@ export function NavObra({
         {children}
       </div>
       <nav className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        {ABAS.filter((a) => equipe || !a.equipe).map((a) =>
+        {ABAS.filter((a) => (equipe || !a.equipe) && (feedAtivo() || (a.chave !== "feed" && a.chave !== "fotos"))).map((a) =>
           a.chave === atual ? (
             <span key={a.chave} className="font-medium">
               {a.rotulo}

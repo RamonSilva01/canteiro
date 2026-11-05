@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ehEquipe, exigirPerfil } from "@/lib/sessao";
-import { hojeSP, numero, texto } from "@/lib/format";
+import { hojeSP, numero, reais, texto } from "@/lib/format";
 import { traduzir } from "@/lib/erros";
+import { feedAtivo } from "@/lib/recursos";
 
 function voltar(obraId: string, erro?: { message: string } | null, extra = ""): never {
   revalidatePath(`/obras/${obraId}`);
@@ -77,7 +78,7 @@ export async function registrarAvanco(obraId: string, fd: FormData) {
   const { supabase, perfil } = await exigirPerfil();
   if (!ehEquipe(perfil)) voltar(obraId);
 
-  const { data: etapas } = await supabase.from("etapas").select("id, percentual_avanco").eq("obra_id", obraId);
+  const { data: etapas } = await supabase.from("etapas").select("id, nome, percentual_avanco").eq("obra_id", obraId);
   const hoje = hojeSP();
   const linhas = (etapas ?? []).flatMap((e) => {
     const v = numero(fd.get(`av_${e.id}`));
@@ -96,6 +97,30 @@ export async function registrarAvanco(obraId: string, fd: FormData) {
   if (linhas.length) {
     const { error } = await supabase.from("avancos_etapa").upsert(linhas, { onConflict: "etapa_id,data_referencia" });
     if (error) voltar(obraId, error);
+
+    // Marco no feed: post automático quando uma etapa chega a 100%. Se falhar, o avanço já está salvo.
+    const concluidas = linhas.filter((l) => l.percentual >= 100);
+    if (feedAtivo() && concluidas.length) {
+      const { data: custos } = await supabase
+        .from("vw_etapas_consolidadas")
+        .select("etapa_id, custo_real")
+        .in("etapa_id", concluidas.map((l) => l.etapa_id));
+      await supabase.from("posts").insert(
+        concluidas.map((l) => {
+          const nome = etapas?.find((e) => e.id === l.etapa_id)?.nome;
+          const custo = custos?.find((c) => c.etapa_id === l.etapa_id)?.custo_real;
+          return {
+            obra_id: obraId,
+            etapa_id: l.etapa_id,
+            autor_id: perfil.id,
+            tipo: "marco",
+            titulo: `${nome} concluída, 100% da etapa`,
+            texto: `Etapa fechada com ${reais(custo)} de gasto real.`,
+            publicado_em: new Date().toISOString(),
+          };
+        }),
+      );
+    }
   }
   voltar(obraId, null, linhas.length ? "?salvo=avanco" : "");
 }

@@ -2,6 +2,8 @@ import { ehEquipe, exigirPerfil } from "@/lib/sessao";
 import { carregarObra, contarPendentes } from "@/lib/obra";
 import { fotosRecentes } from "@/lib/fotos";
 import { dataBR } from "@/lib/format";
+import { feedAtivo } from "@/lib/recursos";
+import { notFound } from "next/navigation";
 import { Cabecalho } from "@/components/Cabecalho";
 import { FaixaPrevia, NavObra } from "@/components/NavObra";
 import { BotaoConfirmar } from "@/components/BotaoConfirmar";
@@ -17,6 +19,7 @@ export default async function FotosPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ ver?: string }>;
 }) {
+  if (!feedAtivo()) notFound();
   const { id } = await params;
   const { ver } = await searchParams;
   const { supabase, perfil } = await exigirPerfil();

@@ -5,6 +5,7 @@ import { contarPendentes } from "@/lib/obra";
 import { dataBR, pct, reaisInteiro } from "@/lib/format";
 import { Cabecalho } from "@/components/Cabecalho";
 import { Kpi } from "@/components/Kpi";
+import { feedAtivo } from "@/lib/recursos";
 import { sair } from "./login/actions";
 
 export const dynamic = "force-dynamic";
@@ -70,6 +71,7 @@ export default async function Home() {
     Promise.all(obras.map((o) => (equipe ? contarPendentes(supabase, o.id) : 0))),
     Promise.all(
       obras.map(async (o) => {
+        if (!feedAtivo()) return 0;
         const { count } = await supabase
           .from("post_midias")
           .select("id", { count: "exact", head: true })

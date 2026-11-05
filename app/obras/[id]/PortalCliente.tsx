@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Perfil } from "@/lib/sessao";
 import { pct, reais, reaisInteiro } from "@/lib/format";
 import { fotosRecentes } from "@/lib/fotos";
+import { feedAtivo } from "@/lib/recursos";
 import { montarDados, ROTULO_SITUACAO, tetoEconometro } from "@/lib/relatorio/dados";
 import { FaixaPrevia } from "@/components/NavObra";
 import { sair } from "@/app/login/actions";
@@ -78,6 +79,7 @@ export async function PortalCliente({
   perfil: Perfil;
   previa?: boolean;
 }) {
+  const comFeed = feedAtivo();
   const [dados, { data: ultimoLanc }, { data: ultimoAvanco }, fotos, { data: relatorio }] = await Promise.all([
     montarDados(supabase, obra),
     supabase
@@ -89,7 +91,7 @@ export async function PortalCliente({
       .limit(1)
       .maybeSingle(),
     supabase.from("avancos_etapa").select("registrado_em").eq("obra_id", obra.id).order("registrado_em", { ascending: false }).limit(1).maybeSingle(),
-    fotosRecentes(supabase, obra.id, 6),
+    comFeed ? fotosRecentes(supabase, obra.id, 6) : [],
     supabase
       .from("relatorios_mensais")
       .select("competencia, pdf_path")
@@ -297,13 +299,14 @@ export async function PortalCliente({
           </div>
         </div>
 
-        <div className="grade g-2">
+        <div className={comFeed ? "grade g-2" : "grade"}>
+          {comFeed && (
           <div className="c-card">
             <div className="flex items-center gap-2.5 mb-3.5">
               <div className="section-title !text-[#7E9AB2] !m-0">Últimas fotos</div>
               <span className="flex-1" />
-              <Link href={`/obras/${obra.id}/fotos${sufixoPrevia}`} className="btn btn-sm" style={{ background: "#16324D", color: "#C9DCEA" }}>
-                Ver todas
+              <Link href={`/obras/${obra.id}/feed${sufixoPrevia}`} className="btn btn-sm" style={{ background: "#16324D", color: "#C9DCEA" }}>
+                Ver o feed
               </Link>
             </div>
             {fotos.length === 0 ? (
@@ -320,6 +323,7 @@ export async function PortalCliente({
               </div>
             )}
           </div>
+          )}
 
           <div className="c-card">
             <div className="section-title !text-[#7E9AB2]">Onde está o dinheiro</div>
