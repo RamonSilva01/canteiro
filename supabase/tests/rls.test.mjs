@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 // Roda a migration e o bootstrap num Postgres em memória (PGlite), com stubs
 // do que o Supabase já traz (auth, storage, papéis), e confere RLS e cálculos.
 // Uso: npm run test:db
-const migracoes = ["0001_init.sql", "0002_importacao_notas.sql", "0003_obras_select_insert.sql"].map((f) =>
+const migracoes = ["0001_init.sql", "0002_importacao_notas.sql", "0003_obras_select_insert.sql", "0004_veto_nota_repetida.sql"].map((f) =>
   readFileSync(new URL(`../migrations/${f}`, import.meta.url), "utf8"));
 const bootstrap = readFileSync(new URL("../seed/bootstrap.sql", import.meta.url), "utf8");
 const db = new PGlite({ extensions: { pg_trgm, unaccent } });
@@ -206,6 +206,24 @@ const imp2 = await como(U.adminA, () => db.query(`select importar_nota_fiscal($1
 const l2 = await db.query(`select sugestao_etapa_id, sugestao_confianca, sugestao_justificativa from lancamentos where nota_fiscal_id = $1`, [imp2.rows[0].id]);
 check("Import: mesmo fornecedor e produto usa histórico exato (0,95)",
   l2.rows.length === 1 && l2.rows[0].sugestao_etapa_id === pintura && Number(l2.rows[0].sugestao_confianca) === 0.95, l2.rows[0]?.sugestao_justificativa);
+// Veto de nota repetida sem chave de acesso (0004)
+const notaVeto = { origem: "documento_ia", numero: "004521", emit_cnpj: "11222333000181", emit_nome: "ZZ Materiais Ltda",
+  data_emissao: "2026-10-05T12:00:00-03:00", valor_total: "300.00" };
+const itemVeto = [{ item_numero: 1, descricao: "CIMENTO", valor_total: "300.00" }];
+const importarVeto = (nota) => como(U.adminA, () => db.query(`select importar_nota_fiscal($1, $2, $3) as id`,
+  [OBRA, JSON.stringify({ ...notaVeto, ...nota }), JSON.stringify(itemVeto.map((i) => ({ ...i, valor_total: nota.valor_total ?? i.valor_total })))]));
+const veto1 = await importarVeto({});
+check("Veto: primeira nota entra", !!veto1.rows[0].id);
+await deveFalhar("Veto: mesmo CNPJ e número (com zeros diferentes), outro valor", () => importarVeto({ numero: "4521", valor_total: "999.00" }));
+await deveFalhar("Veto: mesmo CNPJ, valor e data, número lido errado", () => importarVeto({ numero: "4527" }));
+await deveFalhar("Veto: sem CNPJ, mesmo nome (sem acento) e número", () => importarVeto({ emit_cnpj: null, emit_nome: "ZZ MATERIÁIS LTDA." }));
+await deveFalhar("Veto: sem número, mesmo CNPJ e valor, data faltando", () => importarVeto({ numero: null, data_emissao: null }));
+check("Veto: mesmo CNPJ e valor em outra data, outro número, entra",
+  !!(await importarVeto({ numero: "4600", data_emissao: "2026-10-20T12:00:00-03:00" })).rows[0].id);
+check("Veto: outro CNPJ com mesmo número e valor entra",
+  !!(await importarVeto({ emit_cnpj: "99888777000166", emit_nome: "Outro Fornecedor" })).rows[0].id);
+await como(U.adminA, () => db.query(`update lancamentos set excluido_em = now() where nota_fiscal_id = $1`, [veto1.rows[0].id]));
+check("Veto: nota toda descartada pode ser importada de novo", !!(await importarVeto({})).rows[0].id);
 // Criar obra pela tela faz insert ... returning: a linha nova tem que passar na regra de leitura (0003)
 const criada = await como(U.adminA, () => db.query(`insert into obras (empresa_id, nome) values ('${A}', 'Obra nova') returning id`));
 check("Admin cria obra com returning", criada.rows.length === 1);

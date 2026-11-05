@@ -25,7 +25,7 @@ O arquivo é a verdade, o painel é só para inspeção.
 
 1. **Schema:** colar no SQL Editor do Supabase e rodar, em ordem, cada arquivo de
    `supabase/migrations/` (`0001_init.sql`, `0002_importacao_notas.sql`,
-   `0003_obras_select_insert.sql`). Migration nova entra no fim e no `test:db`.
+   `0003_obras_select_insert.sql`, `0004_veto_nota_repetida.sql`). Migration nova entra no fim e no `test:db`.
 2. **Cadastro fechado:** em Authentication > Sign In / Providers, desligar
    "Allow new users to sign up". Cliente entra só por convite.
 3. **Primeiro admin:** criar o usuário em Authentication > Users > Add user

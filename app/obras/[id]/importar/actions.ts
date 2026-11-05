@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { ehEquipe, exigirPerfil } from "@/lib/sessao";
 import { decodificarXml, lerNfe, type NotaLida } from "@/lib/nfe";
 import { lerNotaComIa } from "@/lib/leitura-ia";
-import { dataBR } from "@/lib/format";
+import { dataBR, reais } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type ArquivoEnviado = { path: string; nome: string; mime: string };
@@ -37,10 +37,12 @@ export async function processarArquivos(obraId: string, arquivos: ArquivoEnviado
         if (duplicada) {
           const { data: anterior } = await supabase
             .from("notas_fiscais")
-            .select("importada_em")
+            .select("numero, emit_nome, valor_total, importada_em")
             .eq("id", duplicada[1])
             .maybeSingle();
-          throw new Error(`esta nota já foi lançada em ${dataBR(anterior?.importada_em)}.`);
+          throw new Error(
+            `vetada por parecer repetida: já existe a NF ${anterior?.numero ?? "s/n"} de ${anterior?.emit_nome ?? "fornecedor não identificado"}, ${reais(anterior?.valor_total)}, importada em ${dataBR(anterior?.importada_em)}. Se for outra nota, lance manualmente.`,
+          );
         }
         throw new Error(erroRpc.message);
       }
