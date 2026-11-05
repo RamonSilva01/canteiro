@@ -3,7 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@react-pdf/renderer"],
   outputFileTracingIncludes: {
-    "/obras/**": ["./lib/relatorio/fonts/**"],
+    // A biblioteca de PDF carrega estes arquivos em tempo de execução, sem o rastreio da Vercel perceber.
+    "/obras/**": ["./lib/relatorio/fonts/**", "./node_modules/pdfkit/js/**"],
   },
 };
 
