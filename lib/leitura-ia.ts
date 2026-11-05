@@ -1,4 +1,5 @@
 import "server-only";
+import Anthropic from "@anthropic-ai/sdk";
 import type { NotaLida } from "./nfe";
 
 // Leitura de nota em PDF ou foto pela Claude API. Só extrai os dados:
@@ -26,7 +27,8 @@ const ESQUEMA = {
           valor_unitario: { type: ["number", "null"] },
           valor_total: { type: "number", description: "valor bruto do item, antes de desconto" },
         },
-        required: ["descricao", "valor_total"],
+        required: ["descricao", "unidade", "quantidade", "valor_unitario", "valor_total"],
+        additionalProperties: false,
       },
     },
     valor_frete: { type: ["number", "null"] },
@@ -34,13 +36,28 @@ const ESQUEMA = {
     valor_outras: { type: ["number", "null"], description: "outras despesas, seguro, IPI somados" },
     valor_total: { type: ["number", "null"], description: "valor total pago na nota" },
   },
-  required: ["eh_nota", "itens"],
+  required: [
+    "eh_nota",
+    "emit_nome",
+    "emit_cnpj",
+    "numero",
+    "data_emissao",
+    "chave_acesso",
+    "itens",
+    "valor_frete",
+    "valor_desconto",
+    "valor_outras",
+    "valor_total",
+  ],
+  additionalProperties: false,
 };
 
 const INSTRUCAO =
   "Extraia os dados desta nota fiscal de compra de material ou serviço de obra. " +
-  "Copie as descrições dos itens como estão escritas. Não invente valores: use null quando não estiver legível. " +
-  "Chame a ferramenta registrar_nota com o resultado.";
+  "Copie as descrições dos itens como estão escritas. Não invente valores: use null quando não estiver legível.";
+
+const MIMES_IMAGEM = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
+type MimeImagem = (typeof MIMES_IMAGEM)[number];
 
 const digitos = (v: unknown, n: number) => {
   const d = String(v ?? "").replace(/\D/g, "");
@@ -53,26 +70,33 @@ export async function lerNotaComIa(arquivo: ArrayBuffer, mime: string): Promise<
   if (!chave) throw new Error("leitura de PDF/foto ainda não está ligada (falta ANTHROPIC_API_KEY).");
 
   const data = Buffer.from(arquivo).toString("base64");
-  const bloco =
+  const bloco: Anthropic.Beta.BetaContentBlockParam =
     mime === "application/pdf"
-      ? { type: "document", source: { type: "base64", media_type: mime, data } }
-      : { type: "image", source: { type: "base64", media_type: mime, data } };
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
+      : { type: "image", source: { type: "base64", media_type: mime as MimeImagem, data } };
 
-  const resposta = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "x-api-key": chave, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({
+  let resposta: Anthropic.Beta.BetaMessage;
+  try {
+    resposta = await new Anthropic({ apiKey: chave }).beta.messages.create({
       model: MODELO,
-      max_tokens: 8000,
-      tools: [{ name: "registrar_nota", description: "Registra os dados lidos da nota", input_schema: ESQUEMA }],
-      tool_choice: { type: "tool", name: "registrar_nota" },
+      max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { format: { type: "json_schema", schema: ESQUEMA } },
       messages: [{ role: "user", content: [bloco, { type: "text", text: INSTRUCAO }] }],
-    }),
-  });
-  if (!resposta.ok) throw new Error(`a leitura automática falhou (${resposta.status}). Tente de novo ou lance manualmente.`);
+    });
+  } catch (e) {
+    if (e instanceof Anthropic.APIError) {
+      throw new Error(`a leitura automática falhou (${e.status ?? "sem conexão"}). Tente de novo ou lance manualmente.`);
+    }
+    throw e;
+  }
+  if (resposta.stop_reason === "refusal" || resposta.stop_reason === "max_tokens") {
+    throw new Error("a leitura automática não conseguiu concluir esta nota. Lance manualmente.");
+  }
 
-  const corpo = await resposta.json();
-  const lido = corpo.content?.find((c: { type: string }) => c.type === "tool_use")?.input;
+  const texto = resposta.content.find((c) => c.type === "text");
+  const lido = texto?.type === "text" ? JSON.parse(texto.text) : null;
   if (!lido?.eh_nota) throw new Error("o arquivo não parece ser uma nota fiscal ou recibo.");
   if (!Array.isArray(lido.itens) || lido.itens.length === 0) throw new Error("não foi possível ler os itens da nota.");
 
