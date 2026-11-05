@@ -24,3 +24,6 @@ export const texto = (v: FormDataEntryValue | null) => String(v ?? "").trim() ||
 /** Data de hoje no fuso da obra (mesma regra do app.hoje() do banco). */
 export const hojeSP = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+
+const brlInteiro = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+export const reaisInteiro = (v: number | string | null | undefined) => brlInteiro.format(Number(v ?? 0));

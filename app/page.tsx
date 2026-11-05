@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { sessao } from "@/lib/sessao";
-import { dataBR, pct, reais } from "@/lib/format";
+import { contarPendentes } from "@/lib/obra";
+import { dataBR, pct, reaisInteiro } from "@/lib/format";
 import { Cabecalho } from "@/components/Cabecalho";
 import { Kpi } from "@/components/Kpi";
-import { BarraDupla, Economia, Situacao } from "@/components/Situacao";
 import { sair } from "./login/actions";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 type ObraConsolidada = {
   id: string;
   nome: string;
+  data_inicio: string | null;
   data_entrega_prevista: string | null;
   orcamento_total: number;
   custo_real_total: number;
@@ -23,6 +24,12 @@ type ObraConsolidada = {
 };
 
 const ORDEM_SITUACAO: Record<string, number> = { atrasada: 0, no_prazo: 1, adiantada: 2, sem_prazo: 3 };
+const SITUACAO: Record<string, [string, string, string]> = {
+  adiantada: ["ADIANTADA", "pill-ok", "ok"],
+  no_prazo: ["NO PRAZO", "pill-warn", "warn"],
+  atrasada: ["ATRASADA", "pill-bad", "bad"],
+  sem_prazo: ["SEM PRAZO", "pill-muted", ""],
+};
 
 export default async function Home() {
   const { supabase, user, perfil } = await sessao();
@@ -46,91 +53,136 @@ export default async function Home() {
     );
   }
 
-  const [{ data }, { data: extras }] = await Promise.all([
-    supabase.from("vw_obras_consolidadas").select("*"),
-    supabase.from("obras").select("id, cliente_nome").is("arquivada_em", null),
-  ]);
+  const { data } = await supabase.from("vw_obras_consolidadas").select("*");
   // Atrasadas primeiro: a pergunta da manhã é "alguma obra precisa de mim hoje?".
   const obras = ((data ?? []) as ObraConsolidada[]).sort(
     (a, b) =>
       ORDEM_SITUACAO[a.situacao_prazo] - ORDEM_SITUACAO[b.situacao_prazo] ||
       (a.data_entrega_prevista ?? "9").localeCompare(b.data_entrega_prevista ?? "9"),
   );
-  const cliente = new Map((extras ?? []).map((o) => [o.id as string, o.cliente_nome as string | null]));
 
   // Cliente com uma obra só vai direto para ela.
   if (perfil.papel === "cliente" && obras.length === 1) redirect(`/obras/${obras[0].id}`);
 
+  const equipe = perfil.papel !== "cliente";
+  const umaSemanaAtras = new Date(Date.now() - 7 * 864e5).toISOString();
+  const [pendentes, fotos] = await Promise.all([
+    Promise.all(obras.map((o) => (equipe ? contarPendentes(supabase, o.id) : 0))),
+    Promise.all(
+      obras.map(async (o) => {
+        const { count } = await supabase
+          .from("post_midias")
+          .select("id", { count: "exact", head: true })
+          .eq("obra_id", o.id)
+          .gte("criada_em", umaSemanaAtras);
+        return count ?? 0;
+      }),
+    ),
+  ]);
   const soma = (k: keyof ObraConsolidada) => obras.reduce((t, o) => t + Number(o[k] ?? 0), 0);
+  const economia = soma("economia_total");
+  const totalPendentes = pendentes.reduce((t, n) => t + n, 0);
 
   return (
     <>
       <Cabecalho perfil={perfil} />
-      <main className="max-w-6xl mx-auto px-4 py-8 flex flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Obras</h1>
+      <main className="max-w-[1180px] mx-auto px-4 py-6">
+        <div className="page-head">
+          <div>
+            <h1 className="font-semibold">Minhas obras</h1>
+            <p className="sub">
+              {obras.length} {obras.length === 1 ? "obra ativa" : "obras ativas"}
+            </p>
+          </div>
+          <span className="spacer" />
           {perfil.papel === "admin" && (
-            <Link href="/obras/nova" className="bg-stone-900 text-white text-sm rounded-md px-4 py-2 hover:bg-stone-700">
+            <Link href="/obras/nova" className="btn btn-ghost btn-sm">
               Nova obra
+            </Link>
+          )}
+          {equipe && obras.length === 1 && (
+            <Link href={`/obras/${obras[0].id}/lancamentos`} className="btn btn-primary">
+              Lançar despesa
             </Link>
           )}
         </div>
 
-        {perfil.papel !== "cliente" && obras.length > 0 && (
-          <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Kpi rotulo="Obras ativas" valor={String(obras.length)} />
-            <Kpi rotulo="Volume sob gestão" valor={reais(soma("orcamento_total"))} />
-            <Kpi rotulo="Gasto até hoje" valor={reais(soma("custo_real_total"))} />
-            <Kpi rotulo="Economia gerada" valor={<Economia valor={soma("economia_total")} />} />
+        {equipe && obras.length > 0 && (
+          <section className="grade g-kpi mb-[18px]">
+            <Kpi rotulo="Obras ativas" valor={String(obras.length)} detalhe={`${reaisInteiro(soma("custo_real_total"))} gastos até hoje`} />
+            <Kpi rotulo="Volume sob gestão" valor={reaisInteiro(soma("orcamento_total"))} detalhe="orçamento somado" />
+            <Kpi
+              rotulo="Economia gerada"
+              valor={reaisInteiro(economia)}
+              detalhe="no acumulado das obras"
+              tom={economia < 0 ? "bad" : economia > 0 ? "ok" : undefined}
+            />
+            <Kpi
+              rotulo="Pendências"
+              valor={String(totalPendentes)}
+              detalhe={totalPendentes === 1 ? "lançamento a conferir" : "lançamentos a conferir"}
+              tom={totalPendentes > 0 ? "bad" : undefined}
+            />
           </section>
         )}
 
         {obras.length === 0 ? (
           <p className="text-stone-600">Nenhuma obra ainda.</p>
         ) : (
-          <section className="grid md:grid-cols-2 gap-4">
-            {obras.map((o) => (
-              <Link
-                key={o.id}
-                href={`/obras/${o.id}`}
-                className="bg-white rounded-xl shadow-sm p-5 flex flex-col gap-3 hover:ring-2 hover:ring-stone-300"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className="font-semibold">{o.nome}</h2>
-                    <p className="text-sm text-stone-500">{cliente.get(o.id) ?? "Cliente não informado"}</p>
+          <section className="grade g-obras">
+            {obras.map((o, i) => {
+              const [rotulo, pill, barra] = SITUACAO[o.situacao_prazo] ?? SITUACAO.sem_prazo;
+              const economiaObra = Number(o.economia_total);
+              return (
+                <Link key={o.id} href={`/obras/${o.id}`} className="obra-card">
+                  <div className="flex gap-2 items-start">
+                    <div className="flex-1">
+                      <h3>{o.nome}</h3>
+                      <div className="end">Entrega prevista: {dataBR(o.data_entrega_prevista)}</div>
+                    </div>
+                    <span className={`pill ${pill}`}>
+                      <i className="dot" />
+                      {rotulo}
+                    </span>
                   </div>
-                  <Situacao valor={o.situacao_prazo} />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <div className="flex justify-between text-sm">
-                    <span>Avanço {pct(o.avanco_geral)}</span>
-                    <span className="text-stone-500">esperado {pct(o.avanco_esperado)}</span>
+                  <div className="row">
+                    <span className="pct num">{pct(o.avanco_geral)}</span>
+                    <span className="vs">
+                      {o.avanco_esperado == null ? "real · sem datas previstas" : `real · projetado para hoje ${pct(o.avanco_esperado)}`}
+                    </span>
                   </div>
-                  <BarraDupla
-                    real={Number(o.avanco_geral)}
-                    esperado={o.avanco_esperado == null ? null : Number(o.avanco_esperado)}
-                  />
-                </div>
-                <dl className="grid grid-cols-3 gap-2 text-sm">
-                  <div>
-                    <dt className="text-stone-500">Projetado</dt>
-                    <dd className="num">{reais(o.custo_projetado_total)}</dd>
+                  <div className={`bar ${barra} mt-2`}>
+                    <i style={{ width: `${Math.min(Number(o.avanco_geral), 100)}%` }} />
+                    {o.avanco_esperado != null && <span className="ghost" style={{ left: `${Math.min(Number(o.avanco_esperado), 100)}%` }} />}
                   </div>
-                  <div>
-                    <dt className="text-stone-500">Gasto</dt>
-                    <dd className="num">{reais(o.custo_real_total)}</dd>
+                  <dl>
+                    <div>
+                      <dt>Projetado</dt>
+                      <dd className="num">{reaisInteiro(o.custo_projetado_total)}</dd>
+                    </div>
+                    <div>
+                      <dt>Gasto</dt>
+                      <dd className="num">{reaisInteiro(o.custo_real_total)}</dd>
+                    </div>
+                  </dl>
+                  <div className="foot">
+                    <span>
+                      Econômetro{" "}
+                      <b className={`num ${economiaObra < 0 ? "text-[var(--bad)]" : economiaObra > 0 ? "text-[var(--ok)]" : ""}`}>
+                        {reaisInteiro(economiaObra)}
+                      </b>
+                    </span>
+                    {pendentes[i] > 0 ? (
+                      <span className="pill pill-bad !py-0.5 !px-2">
+                        {pendentes[i]} {pendentes[i] === 1 ? "lançamento pendente" : "lançamentos pendentes"}
+                      </span>
+                    ) : (
+                      fotos[i] > 0 && <span>{fotos[i]} {fotos[i] === 1 ? "foto esta semana" : "fotos esta semana"}</span>
+                    )}
                   </div>
-                  <div>
-                    <dt className="text-stone-500">Economia</dt>
-                    <dd>
-                      <Economia valor={Number(o.economia_total)} />
-                    </dd>
-                  </div>
-                </dl>
-                <p className="text-xs text-stone-500">Entrega prevista: {dataBR(o.data_entrega_prevista)}</p>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </section>
         )}
       </main>

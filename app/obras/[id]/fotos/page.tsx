@@ -3,18 +3,26 @@ import { carregarObra, contarPendentes } from "@/lib/obra";
 import { fotosRecentes } from "@/lib/fotos";
 import { dataBR } from "@/lib/format";
 import { Cabecalho } from "@/components/Cabecalho";
-import { NavObra } from "@/components/NavObra";
+import { FaixaPrevia, NavObra } from "@/components/NavObra";
 import { BotaoConfirmar } from "@/components/BotaoConfirmar";
 import { EnviarFotos } from "./EnviarFotos";
 import { removerFoto } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function FotosPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function FotosPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ ver?: string }>;
+}) {
   const { id } = await params;
+  const { ver } = await searchParams;
   const { supabase, perfil } = await exigirPerfil();
   const obra = await carregarObra(supabase, id);
-  const equipe = ehEquipe(perfil);
+  const previa = ver === "cliente" && ehEquipe(perfil);
+  const equipe = ehEquipe(perfil) && !previa;
 
   const [{ data: etapas }, fotos, pendentes] = await Promise.all([
     supabase.from("etapas").select("id, nome").eq("obra_id", id).order("ordem"),
@@ -29,9 +37,10 @@ export default async function FotosPage({ params }: { params: Promise<{ id: stri
 
   return (
     <>
+      {previa && <FaixaPrevia obraId={id} />}
       <Cabecalho perfil={perfil} />
       <main className="max-w-6xl mx-auto px-4 py-8 flex flex-col gap-6">
-        <NavObra obraId={id} nome={obra.nome} atual="fotos" equipe={equipe} pendentes={pendentes} />
+        <NavObra obraId={id} nome={obra.nome} atual="fotos" equipe={equipe} previa={previa} pendentes={pendentes} />
 
         {equipe && (
           <section className="bg-white rounded-xl shadow-sm p-5 flex flex-col gap-3">

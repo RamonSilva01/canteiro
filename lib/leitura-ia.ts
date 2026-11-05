@@ -56,8 +56,7 @@ const INSTRUCAO =
   "Extraia os dados desta nota fiscal de compra de material ou serviço de obra. " +
   "Copie as descrições dos itens como estão escritas. Não invente valores: use null quando não estiver legível.";
 
-const MIMES_IMAGEM = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
-type MimeImagem = (typeof MIMES_IMAGEM)[number];
+type MimeImagem = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
 const digitos = (v: unknown, n: number) => {
   const d = String(v ?? "").replace(/\D/g, "");

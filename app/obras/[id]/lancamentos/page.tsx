@@ -2,7 +2,7 @@ import { ehEquipe, exigirPerfil } from "@/lib/sessao";
 import { dataBR, hojeSP, reais } from "@/lib/format";
 import { buscarLancamentos, carregarObra, contarPendentes } from "@/lib/obra";
 import { Cabecalho } from "@/components/Cabecalho";
-import { NavObra } from "@/components/NavObra";
+import { FaixaPrevia, NavObra } from "@/components/NavObra";
 import { BotaoConfirmar } from "@/components/BotaoConfirmar";
 import { Campo, inputPequeno } from "@/components/Campo";
 import { excluirLancamento, lancarManual } from "./actions";
@@ -31,7 +31,8 @@ export default async function LancamentosPage({
   const { supabase, perfil } = await exigirPerfil();
 
   const obra = await carregarObra(supabase, id);
-  const equipe = ehEquipe(perfil);
+  const previa = sp.ver === "cliente" && ehEquipe(perfil);
+  const equipe = ehEquipe(perfil) && !previa;
 
   const [{ data: etapas }, { data: subetapas }, { lista: lancamentos, filtrando }, pendentes] = await Promise.all([
     supabase.from("etapas").select("id, nome").eq("obra_id", id).order("ordem"),
@@ -52,9 +53,10 @@ export default async function LancamentosPage({
 
   return (
     <>
+      {previa && <FaixaPrevia obraId={id} />}
       <Cabecalho perfil={perfil} />
       <main className="max-w-6xl mx-auto px-4 py-8 flex flex-col gap-6">
-        <NavObra obraId={id} nome={obra.nome} atual="lancamentos" equipe={equipe} pendentes={pendentes} />
+        <NavObra obraId={id} nome={obra.nome} atual="lancamentos" equipe={equipe} previa={previa} pendentes={pendentes} />
 
         {sp.erro && <p className="bg-red-50 text-red-700 text-sm rounded-md px-4 py-2">{sp.erro}</p>}
         {sp.ok && <p className="bg-emerald-50 text-emerald-800 text-sm rounded-md px-4 py-2">Lançamento salvo.</p>}

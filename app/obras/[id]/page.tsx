@@ -33,14 +33,16 @@ export default async function ObraPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ erro?: string; editar?: string; salvo?: string; etapas_salvas?: string }>;
+  searchParams: Promise<{ erro?: string; editar?: string; salvo?: string; etapas_salvas?: string; ver?: string }>;
 }) {
   const { id } = await params;
-  const { erro, editar, salvo, etapas_salvas } = await searchParams;
+  const { erro, editar, salvo, etapas_salvas, ver } = await searchParams;
   const { supabase, perfil } = await exigirPerfil();
 
   const obra = await carregarObra(supabase, id);
-  if (perfil.papel === "cliente") return <PortalCliente supabase={supabase} obra={obra} perfil={perfil} />;
+  if (perfil.papel === "cliente" || ver === "cliente") {
+    return <PortalCliente supabase={supabase} obra={obra} perfil={perfil} previa={perfil.papel !== "cliente"} />;
+  }
 
   const [{ data: resumo }, { data: etapasData }, { data: subetapas }, pendentes] = await Promise.all([
     supabase.from("vw_obras_consolidadas").select("*").eq("id", id).maybeSingle(),
@@ -63,6 +65,15 @@ export default async function ObraPage({
       <main className="max-w-6xl mx-auto px-4 py-8 flex flex-col gap-6">
         <NavObra obraId={id} nome={obra.nome} atual="acompanhamento" equipe={equipe} pendentes={pendentes}>
           <Situacao valor={resumo?.situacao_prazo ?? null} />
+          <span className="flex-1" />
+          <Link href={`/obras/${id}?ver=cliente`} className="btn btn-ghost btn-sm">
+            Ver como cliente
+          </Link>
+          {admin && (
+            <Link href={`/obras/${id}/relatorio`} className="btn btn-primary btn-sm">
+              Gerar relatório PDF
+            </Link>
+          )}
         </NavObra>
         <p className="-mt-4 text-sm text-stone-500">
           {[obra.cliente_nome, [obra.endereco_cidade, obra.endereco_uf].filter(Boolean).join("/")]

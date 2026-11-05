@@ -8,6 +8,16 @@ const ABAS = [
   { chave: "conferir", rotulo: "Conferir", caminho: "/conferir", equipe: true },
 ] as const;
 
+/** Aviso das telas abertas em "Ver como cliente": o administrador vê sem controles de edição. */
+export function FaixaPrevia({ obraId }: { obraId: string }) {
+  return (
+    <div className="faixa-previa">
+      Prévia: é assim que o cliente vê esta obra.
+      <Link href={`/obras/${obraId}`}>Voltar para a visão do administrador</Link>
+    </div>
+  );
+}
+
 export type Aba = (typeof ABAS)[number]["chave"];
 
 /** Cabeçalho comum das telas da obra: voltar, nome e abas. */
@@ -17,6 +27,7 @@ export function NavObra({
   atual,
   equipe,
   pendentes = 0,
+  previa = false,
   children,
 }: {
   obraId: string;
@@ -24,6 +35,7 @@ export function NavObra({
   atual: Aba;
   equipe: boolean;
   pendentes?: number;
+  previa?: boolean;
   children?: React.ReactNode;
 }) {
   return (
@@ -42,7 +54,7 @@ export function NavObra({
               {a.rotulo}
             </span>
           ) : (
-            <Link key={a.chave} href={`/obras/${obraId}${a.caminho}`} className="underline text-stone-600">
+            <Link key={a.chave} href={`/obras/${obraId}${a.caminho}${previa ? "?ver=cliente" : ""}`} className="underline text-stone-600">
               {a.rotulo}
               {a.chave === "conferir" && pendentes > 0 && (
                 <span className="ml-1 text-xs bg-amber-200 text-amber-900 rounded-full px-1.5 no-underline">{pendentes}</span>
