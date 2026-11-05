@@ -22,7 +22,6 @@ export async function salvarEtapas(obraId: string, fd: FormData) {
         .from("etapas")
         .update({
           nome: texto(fd.get(`nome_${id}`)),
-          ordem: numero(fd.get(`ordem_${id}`)) ?? 0,
           orcamento_referencia: numero(fd.get(`orc_${id}`)) ?? 0,
           data_inicio_prevista: texto(fd.get(`ini_${id}`)),
           data_fim_prevista: texto(fd.get(`fim_${id}`)),
@@ -31,7 +30,21 @@ export async function salvarEtapas(obraId: string, fd: FormData) {
         .eq("obra_id", obraId),
     ),
   );
-  voltar(obraId, resultados.find((r) => r.error)?.error);
+  voltar(obraId, resultados.find((r) => r.error)?.error, "?editar=1&etapas_salvas=1");
+}
+
+// Chamada ao soltar uma etapa arrastada: grava a posição de todas, sem mexer nos outros campos.
+export async function reordenarEtapas(obraId: string, ids: string[]): Promise<{ erro?: string }> {
+  const { supabase, perfil } = await exigirPerfil();
+  if (perfil.papel !== "admin") return { erro: "Só o administrador muda a ordem das etapas." };
+
+  const resultados = await Promise.all(
+    ids.map((id, i) => supabase.from("etapas").update({ ordem: i + 1 }).eq("id", id).eq("obra_id", obraId)),
+  );
+  const erro = resultados.find((r) => r.error)?.error;
+  if (erro) return { erro: traduzir(erro.message) };
+  revalidatePath(`/obras/${obraId}`, "layout");
+  return {};
 }
 
 export async function adicionarEtapa(obraId: string, fd: FormData) {

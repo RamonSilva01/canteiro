@@ -7,9 +7,9 @@ import { dataBR, pct, reais } from "@/lib/format";
 import { Cabecalho } from "@/components/Cabecalho";
 import { Kpi } from "@/components/Kpi";
 import { inputPequeno } from "@/components/Campo";
-import { BotaoConfirmar } from "@/components/BotaoConfirmar";
 import { BarraDupla, Economia, Situacao } from "@/components/Situacao";
-import { adicionarEtapa, registrarAvanco, removerEtapa, salvarEtapas } from "./actions";
+import { EditorEtapas } from "./EditorEtapas";
+import { adicionarEtapa, registrarAvanco } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +33,10 @@ export default async function ObraPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ erro?: string; editar?: string; salvo?: string }>;
+  searchParams: Promise<{ erro?: string; editar?: string; salvo?: string; etapas_salvas?: string }>;
 }) {
   const { id } = await params;
-  const { erro, editar, salvo } = await searchParams;
+  const { erro, editar, salvo, etapas_salvas } = await searchParams;
   const { supabase, perfil } = await exigirPerfil();
 
   const obra = await carregarObra(supabase, id);
@@ -78,6 +78,7 @@ export default async function ObraPage({
 
         {erro && <p className="bg-red-50 text-red-700 text-sm rounded-md px-4 py-2">{erro}</p>}
         {salvo && <p className="bg-emerald-50 text-emerald-800 text-sm rounded-md px-4 py-2">Avanço salvo.</p>}
+        {etapas_salvas && <p className="bg-emerald-50 text-emerald-800 text-sm rounded-md px-4 py-2">Etapas salvas.</p>}
 
         <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-white rounded-xl shadow-sm p-4 col-span-2 md:col-span-1 flex flex-col gap-2">
@@ -200,46 +201,7 @@ export default async function ObraPage({
             <p className="mt-2 text-sm text-stone-500">
               As datas previstas definem o &quot;esperado para hoje&quot; de cada etapa e o status da obra.
             </p>
-            <form action={salvarEtapas.bind(null, id)} className="mt-4 flex flex-col gap-2">
-              <div className="hidden md:grid grid-cols-[3.5rem_1fr_9rem_9rem_9rem_5rem] gap-2 text-xs text-stone-500">
-                <span>Ordem</span>
-                <span>Nome</span>
-                <span>Orçamento (R$)</span>
-                <span>Início previsto</span>
-                <span>Fim previsto</span>
-                <span />
-              </div>
-              {etapas.map((e) => (
-                <div
-                  key={e.etapa_id}
-                  className="grid grid-cols-2 md:grid-cols-[3.5rem_1fr_9rem_9rem_9rem_5rem] gap-2 border-b border-stone-100 pb-2"
-                >
-                  <input type="hidden" name="id" value={e.etapa_id} />
-                  <input name={`ordem_${e.etapa_id}`} defaultValue={e.ordem} inputMode="numeric" className={inputPequeno} aria-label="Ordem" />
-                  <input name={`nome_${e.etapa_id}`} defaultValue={e.nome} required className={inputPequeno} aria-label="Nome" />
-                  <input
-                    name={`orc_${e.etapa_id}`}
-                    defaultValue={Number(e.orcamento_referencia).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
-                    inputMode="decimal"
-                    className={`${inputPequeno} text-right num`}
-                    aria-label="Orçamento"
-                  />
-                  <input name={`ini_${e.etapa_id}`} type="date" defaultValue={e.data_inicio_prevista ?? ""} className={inputPequeno} aria-label="Início previsto" />
-                  <input name={`fim_${e.etapa_id}`} type="date" defaultValue={e.data_fim_prevista ?? ""} className={inputPequeno} aria-label="Fim previsto" />
-                  <BotaoConfirmar
-                    pergunta={`Remover a etapa "${e.nome}"? Etapa com lançamentos não pode ser removida.`}
-                    formAction={removerEtapa.bind(null, id, e.etapa_id)}
-                    formNoValidate
-                    className="text-xs text-red-600 underline justify-self-start md:justify-self-end"
-                  >
-                    Remover
-                  </BotaoConfirmar>
-                </div>
-              ))}
-              <button type="submit" className="self-end bg-stone-900 text-white rounded-md px-4 py-2 hover:bg-stone-700">
-                Salvar etapas
-              </button>
-            </form>
+            <EditorEtapas obraId={id} etapas={etapas} />
             <form action={adicionarEtapa.bind(null, id)} className="mt-4 flex gap-2">
               <input name="nome" required placeholder="Nova etapa" className={inputPequeno} />
               <button type="submit" className="whitespace-nowrap border border-stone-300 rounded-md px-3 text-sm">
