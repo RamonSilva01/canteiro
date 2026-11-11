@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { entrar } from "./actions";
 
 export default async function LoginPage({
@@ -6,6 +8,14 @@ export default async function LoginPage({
   searchParams: Promise<{ erro?: string }>;
 }) {
   const { erro } = await searchParams;
+  // Quem já está logado (ex.: abriu o link do convite de novo) vai direto para as obras.
+  if (erro !== "desligado") {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) redirect("/");
+  }
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-stone-100 px-4">
@@ -41,7 +51,7 @@ export default async function LoginPage({
         {erro && (
           <p className="text-sm text-red-600">
             {erro === "link"
-              ? "Este link de acesso expirou ou já foi usado. Peça um novo ao administrador da obra."
+              ? "Este link de acesso já foi usado ou venceu. Se você já criou sua senha, é só entrar aqui com seu e-mail e senha. Se ainda não criou, peça um novo link ao administrador da obra."
               : erro === "desligado"
                 ? "Seu acesso foi desligado pelo administrador da obra."
                 : "E-mail ou senha incorretos."}
