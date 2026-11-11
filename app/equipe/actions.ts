@@ -112,3 +112,21 @@ export async function salvarAcesso(usuarioId: string, fd: FormData) {
   await supabase.from("perfis").update({ ativo: fd.get("ativo") === "on" }).eq("id", usuarioId);
   revalidatePath("/equipe");
 }
+
+/**
+ * Exclui a pessoa de vez: some o login, o perfil e os vínculos com obras.
+ * Só o administrador, nunca a si mesmo. Lançamentos, notas e fotos que ela
+ * registrou ficam (o autor passa a aparecer em branco); comentários dela no feed somem.
+ */
+export async function excluirPessoa(usuarioId: string) {
+  const { perfil } = await exigirPerfil();
+  if (perfil.papel !== "admin" || usuarioId === perfil.id) return;
+
+  const admin = createAdminClient();
+  const { data: pessoa } = await admin.from("perfis").select("empresa_id").eq("id", usuarioId).maybeSingle();
+  if (!pessoa || pessoa.empresa_id !== perfil.empresa_id) return;
+
+  const { error } = await admin.auth.admin.deleteUser(usuarioId);
+  if (error) throw new Error(`Não foi possível excluir (${error.message}).`);
+  revalidatePath("/equipe");
+}

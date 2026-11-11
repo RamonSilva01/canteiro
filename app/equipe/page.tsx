@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { exigirPerfil } from "@/lib/sessao";
 import { Cabecalho } from "@/components/Cabecalho";
 import { BotaoNovoLink, FormConvite } from "./Convite";
-import { salvarAcesso } from "./actions";
+import { BotaoConfirmar } from "@/components/BotaoConfirmar";
+import { excluirPessoa, salvarAcesso } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,17 @@ export default async function EquipePage() {
                         </button>
                       </div>
                     </form>
-                    <BotaoNovoLink usuarioId={p.id} />
+                    <div className="flex flex-wrap items-center gap-4">
+                      <BotaoNovoLink usuarioId={p.id} />
+                      <form action={excluirPessoa.bind(null, p.id)}>
+                        <BotaoConfirmar
+                          pergunta={`Excluir ${p.nome} do Canteiro? O acesso some de vez e não dá para desfazer. Os lançamentos que essa pessoa fez continuam na obra.`}
+                          className="text-sm text-red-700 underline"
+                        >
+                          Excluir pessoa
+                        </BotaoConfirmar>
+                      </form>
+                    </div>
                   </>
                 )}
               </div>

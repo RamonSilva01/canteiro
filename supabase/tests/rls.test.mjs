@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 // Roda a migration e o bootstrap num Postgres em memória (PGlite), com stubs
 // do que o Supabase já traz (auth, storage, papéis), e confere RLS e cálculos.
 // Uso: npm run test:db
-const migracoes = ["0001_init.sql", "0002_importacao_notas.sql", "0003_obras_select_insert.sql", "0004_veto_nota_repetida.sql"].map((f) =>
+const migracoes = ["0001_init.sql", "0002_importacao_notas.sql", "0003_obras_select_insert.sql", "0004_veto_nota_repetida.sql", "0005_colaborador_cria_obra.sql"].map((f) =>
   readFileSync(new URL(`../migrations/${f}`, import.meta.url), "utf8"));
 const bootstrap = readFileSync(new URL("../seed/bootstrap.sql", import.meta.url), "utf8");
 const db = new PGlite({ extensions: { pg_trgm, unaccent } });
@@ -160,8 +160,11 @@ const et = await como(U.adminA, () => db.query(
 check("Tela: admin cria etapa sem mandar empresa_id", et.rows[0].empresa_id === A);
 await deveFalhar("Tela: etapa com lançamento não pode ser removida", () => como(U.adminA, () => db.query(
   `delete from etapas where id = $1`, [fund])));
-const t7 = await como(U.colabA, () => db.query(`update etapas set orcamento_referencia = 1 where id = $1`, [fund]));
-check("T7 colaborador não altera orçamento", t7.affectedRows === 0);
+// 0005: colaborador vinculado monta as etapas; o não vinculado não mexe
+const t7 = await como(U.colab2, () => db.query(`update etapas set orcamento_referencia = 1 where id = $1`, [fund]));
+check("T7 colaborador não vinculado não altera orçamento", t7.affectedRows === 0);
+const t7b = await como(U.colabA, () => db.query(`update etapas set orcamento_referencia = 60000 where id = $1`, [fund]));
+check("0005 colaborador vinculado altera orçamento da etapa", t7b.affectedRows === 1);
 await deveFalhar("T8 cliente não se promove a admin", () => como(U.cliA, () => db.query(
   `update perfis set papel = 'admin' where id = '${U.cliA}'`)));
 await deveFalhar("T9 vincular usuário a obra de outra empresa", () => db.query(
@@ -230,6 +233,37 @@ check("Admin cria obra com returning", criada.rows.length === 1);
 await deveFalhar("Cliente não cria obra", () => como(U.cliA, () => db.query(`insert into obras (empresa_id, nome) values ('${A}', 'Obra do cliente') returning id`)));
 const vistas = await como(U.cliA, () => db.query(`select nome from obras order by nome`));
 check("Cliente continua vendo só a obra dele", vistas.rows.map(r => r.nome).join() === "Portobello", vistas.rows.map(r => r.nome).join());
+// 0005: colaborador cria obra (id gerado na tela, insert sem returning) e já fica vinculado
+const OBRA_COLAB = "10000000-0000-0000-0000-0000000000c2";
+await como(U.colab2, () => db.query(`insert into obras (id, empresa_id, nome, criada_por) values ($1, '${A}', 'Obra do colaborador', $2)`, [OBRA_COLAB, U.colab2]));
+const vinc = await db.query(`select 1 from obra_membros where obra_id = $1 and usuario_id = $2`, [OBRA_COLAB, U.colab2]);
+check("0005 quem criou fica vinculado à obra", vinc.rows.length === 1);
+const vistaColab = await como(U.colab2, () => db.query(`select nome from obras where id = $1`, [OBRA_COLAB]));
+check("0005 colaborador enxerga a obra que criou", vistaColab.rows.length === 1);
+await como(U.colab2, () => db.query(`insert into etapas (obra_id, nome, ordem) values ($1, 'Fundação', 1), ($1, 'Alvenaria', 2)`, [OBRA_COLAB]));
+const etColab = await como(U.colab2, () => db.query(`update etapas set orcamento_referencia = 1000, ordem = ordem + 10 where obra_id = $1`, [OBRA_COLAB]));
+check("0005 colaborador cria e edita as etapas da obra dele", etColab.affectedRows === 2);
+await deveFalhar("0005 colaborador não cria obra em nome de outro", () => como(U.colab2, () => db.query(
+  `insert into obras (empresa_id, nome, criada_por) values ('${A}', 'Obra falsa', $1)`, [U.adminA])));
+await deveFalhar("0005 colaborador não cria obra em outra empresa", () => como(U.colab2, () => db.query(
+  `insert into obras (empresa_id, nome, criada_por) values ('${B}', 'Obra B2', $1)`, [U.colab2])));
+const naoVeOutra = await como(U.colab2, () => db.query(`select nome from obras where id = '10000000-0000-0000-0000-000000000001'`));
+check("0005 colaborador segue sem ver obra a que não foi vinculado", naoVeOutra.rows.length === 0);
+const arq = await como(U.colab2, () => db.query(`update obras set nome = 'x' where id = $1`, [OBRA_COLAB]));
+check("0005 colaborador não edita os dados da obra", arq.affectedRows === 0);
+const delObra = await como(U.colab2, () => db.query(`delete from obras where id = $1`, [OBRA_COLAB]));
+check("0005 colaborador não exclui obra", delObra.affectedRows === 0);
+const delPessoa = await como(U.colabA, () => db.query(`delete from perfis where id = $1`, [U.cliA]));
+check("0005 colaborador não exclui pessoa", delPessoa.affectedRows === 0);
+
+// Excluir pessoa (o servidor apaga o auth.users com a chave secreta): perfil e vínculos somem, lançamentos ficam
+const lancAntes = await db.query(`select count(*)::int n from lancamentos`);
+await db.query(`delete from auth.users where id = $1`, [U.colabA]);
+const restos = await db.query(`select (select count(*)::int from perfis where id = $1) p, (select count(*)::int from obra_membros where usuario_id = $1) m`, [U.colabA]);
+const lancDepois = await db.query(`select count(*)::int n from lancamentos`);
+check("Excluir pessoa: perfil e vínculos somem", restos.rows[0].p === 0 && restos.rows[0].m === 0);
+check("Excluir pessoa: lançamentos dela continuam", lancAntes.rows[0].n === lancDepois.rows[0].n);
+
 const anon = await db.exec(`set role anon;`).then(() => db.query(`select count(*) from obras`)).then(() => "leu", () => "negado").finally(() => db.exec("reset role"));
 check("anon não lê nada", anon === "negado");
 

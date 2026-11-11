@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { exigirPerfil } from "@/lib/sessao";
+import { ehEquipe, exigirPerfil } from "@/lib/sessao";
 import { Cabecalho } from "@/components/Cabecalho";
 import { Campo } from "@/components/Campo";
 import { criarObra } from "./actions";
 
 export default async function NovaObra({ searchParams }: { searchParams: Promise<{ erro?: string }> }) {
   const { perfil } = await exigirPerfil();
-  if (perfil.papel !== "admin") redirect("/");
+  if (!ehEquipe(perfil)) redirect("/");
   const { erro } = await searchParams;
 
   return (

@@ -97,7 +97,7 @@ export default async function Home() {
             </p>
           </div>
           <span className="spacer" />
-          {perfil.papel === "admin" && (
+          {equipe && (
             <Link href="/obras/nova" className="btn btn-ghost btn-sm">
               Nova obra
             </Link>

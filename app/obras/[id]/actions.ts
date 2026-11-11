@@ -14,7 +14,7 @@ function voltar(obraId: string, erro?: { message: string } | null, extra = ""): 
 
 export async function salvarEtapas(obraId: string, fd: FormData) {
   const { supabase, perfil } = await exigirPerfil();
-  if (perfil.papel !== "admin") voltar(obraId);
+  if (!ehEquipe(perfil)) voltar(obraId);
 
   const ids = fd.getAll("id").map(String);
   const resultados = await Promise.all(
@@ -37,7 +37,7 @@ export async function salvarEtapas(obraId: string, fd: FormData) {
 // Chamada ao soltar uma etapa arrastada: grava a posição de todas, sem mexer nos outros campos.
 export async function reordenarEtapas(obraId: string, ids: string[]): Promise<{ erro?: string }> {
   const { supabase, perfil } = await exigirPerfil();
-  if (perfil.papel !== "admin") return { erro: "Só o administrador muda a ordem das etapas." };
+  if (!ehEquipe(perfil)) return { erro: "Só a equipe muda a ordem das etapas." };
 
   const resultados = await Promise.all(
     ids.map((id, i) => supabase.from("etapas").update({ ordem: i + 1 }).eq("id", id).eq("obra_id", obraId)),
@@ -50,7 +50,7 @@ export async function reordenarEtapas(obraId: string, ids: string[]): Promise<{ 
 
 export async function adicionarEtapa(obraId: string, fd: FormData) {
   const { supabase, perfil } = await exigirPerfil();
-  if (perfil.papel !== "admin") voltar(obraId);
+  if (!ehEquipe(perfil)) voltar(obraId);
 
   const { data: ultima } = await supabase
     .from("etapas")
@@ -67,7 +67,7 @@ export async function adicionarEtapa(obraId: string, fd: FormData) {
 
 export async function removerEtapa(obraId: string, etapaId: string) {
   const { supabase, perfil } = await exigirPerfil();
-  if (perfil.papel !== "admin") voltar(obraId);
+  if (!ehEquipe(perfil)) voltar(obraId);
 
   const { error } = await supabase.from("etapas").delete().eq("id", etapaId).eq("obra_id", obraId);
   voltar(obraId, error, "?editar=1");

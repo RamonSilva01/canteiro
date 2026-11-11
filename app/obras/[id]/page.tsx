@@ -206,7 +206,7 @@ export default async function ObraPage({
           </details>
         )}
 
-        {admin && (
+        {equipe && (
           <details className="bg-white rounded-xl shadow-sm p-5" open={!!editar}>
             <summary className="font-semibold cursor-pointer">Editar etapas, orçamento e datas previstas</summary>
             <p className="mt-2 text-sm text-stone-500">

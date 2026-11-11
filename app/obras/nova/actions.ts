@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { exigirPerfil } from "@/lib/sessao";
+import { ehEquipe, exigirPerfil } from "@/lib/sessao";
 import { numero, texto } from "@/lib/format";
 
 // Usado quando a empresa ainda não cadastrou um template padrão próprio.
@@ -21,11 +21,15 @@ const ETAPAS_PADRAO = [
 
 export async function criarObra(fd: FormData) {
   const { supabase, perfil } = await exigirPerfil();
-  if (perfil.papel !== "admin") redirect("/");
+  if (!ehEquipe(perfil)) redirect("/");
 
-  const { data: obra, error } = await supabase
+  // Id gerado aqui e insert sem RETURNING: o colaborador só passa a enxergar a obra
+  // depois que o banco o vincula a ela (trigger da migration 0005).
+  const obra = { id: crypto.randomUUID() };
+  const { error } = await supabase
     .from("obras")
     .insert({
+      id: obra.id,
       empresa_id: perfil.empresa_id,
       criada_por: perfil.id,
       nome: texto(fd.get("nome")),
@@ -36,10 +40,8 @@ export async function criarObra(fd: FormData) {
       data_inicio: texto(fd.get("data_inicio")),
       data_entrega_prevista: texto(fd.get("data_entrega_prevista")),
       projecao_venda: numero(fd.get("projecao_venda")),
-    })
-    .select("id")
-    .single();
-  if (error || !obra) redirect(`/obras/nova?erro=${encodeURIComponent(error?.message ?? "erro")}`);
+    });
+  if (error) redirect(`/obras/nova?erro=${encodeURIComponent(error.message)}`);
 
   const { data: tpl } = await supabase.from("templates_obra").select("id").eq("eh_padrao", true).maybeSingle();
   if (tpl) {

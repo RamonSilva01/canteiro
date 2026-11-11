@@ -46,7 +46,7 @@ export function FormConvite({ obras }: { obras: { id: string; nome: string }[] }
           className="border border-stone-300 rounded-md px-3 py-2 bg-white"
         >
           <option value="cliente">Cliente (vê a obra, não edita)</option>
-          <option value="colaborador">Colaborador (lança e atualiza avanço)</option>
+          <option value="colaborador">Colaborador (cria obras, lança e atualiza avanço)</option>
           <option value="admin">Administrador (tudo)</option>
         </select>
       </div>
