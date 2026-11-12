@@ -26,6 +26,8 @@ type Etapa = {
   economia: number;
   avanco_esperado: number | null;
   situacao_prazo: string;
+  fases: { inicio: string; fim: string }[] | null;
+  obra_toda: boolean;
 };
 
 export default async function ObraPage({
@@ -132,9 +134,15 @@ export default async function ObraPage({
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="text-xs text-stone-500">
+                      {e.obra_toda && <div>obra toda</div>}
                       {e.data_inicio_prevista
-                        ? `${dataBR(e.data_inicio_prevista)} a ${dataBR(e.data_fim_prevista)}`
-                        : "sem datas"}
+                        ? (e.fases?.length && !e.obra_toda ? e.fases : [{ inicio: e.data_inicio_prevista, fim: e.data_fim_prevista }]).map((f, i, todas) => (
+                            <div key={i}>
+                              {todas.length > 1 && `${i + 1}ª fase: `}
+                              {dataBR(f.inicio)} a {dataBR(f.fim)}
+                            </div>
+                          ))
+                        : e.obra_toda ? "faltam as datas da obra" : "sem datas"}
                     </div>
                     {e.situacao_prazo !== "sem_prazo" && <Situacao valor={e.situacao_prazo} />}
                   </td>
@@ -210,7 +218,9 @@ export default async function ObraPage({
           <details className="bg-white rounded-xl shadow-sm p-5" open={!!editar}>
             <summary className="font-semibold cursor-pointer">Editar etapas, orçamento e datas previstas</summary>
             <p className="mt-2 text-sm text-stone-500">
-              As datas previstas definem o &quot;esperado para hoje&quot; de cada etapa e o status da obra.
+              As datas previstas definem o &quot;esperado para hoje&quot; de cada etapa e o status da obra. Etapa que volta em
+              momentos diferentes (hidráulica no início, no meio e no fim) ganha uma fase para cada momento em &quot;+ fase&quot;:
+              entre uma fase e outra o esperado fica parado. Mão de obra e locação: marque &quot;obra toda&quot;.
             </p>
             <EditorEtapas obraId={id} etapas={etapas} />
             <form action={adicionarEtapa.bind(null, id)} className="mt-4 flex gap-2">

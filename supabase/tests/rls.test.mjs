@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 // Roda a migration e o bootstrap num Postgres em memória (PGlite), com stubs
 // do que o Supabase já traz (auth, storage, papéis), e confere RLS e cálculos.
 // Uso: npm run test:db
-const migracoes = ["0001_init.sql", "0002_importacao_notas.sql", "0003_obras_select_insert.sql", "0004_veto_nota_repetida.sql", "0005_colaborador_cria_obra.sql"].map((f) =>
+const migracoes = ["0001_init.sql", "0002_importacao_notas.sql", "0003_obras_select_insert.sql", "0004_veto_nota_repetida.sql", "0005_colaborador_cria_obra.sql", "0006_etapas_fases.sql"].map((f) =>
   readFileSync(new URL(`../migrations/${f}`, import.meta.url), "utf8"));
 const bootstrap = readFileSync(new URL("../seed/bootstrap.sql", import.meta.url), "utf8");
 const db = new PGlite({ extensions: { pg_trgm, unaccent } });
@@ -263,6 +263,35 @@ const restos = await db.query(`select (select count(*)::int from perfis where id
 const lancDepois = await db.query(`select count(*)::int n from lancamentos`);
 check("Excluir pessoa: perfil e vínculos somem", restos.rows[0].p === 0 && restos.rows[0].m === 0);
 check("Excluir pessoa: lançamentos dela continuam", lancAntes.rows[0].n === lancDepois.rows[0].n);
+
+// 0006: etapa em fases e etapa que dura a obra toda
+const OB = "10000000-0000-0000-0000-000000000001";
+const hid = await como(U.adminA, () => db.query(
+  `insert into etapas (obra_id, nome, ordem, orcamento_referencia, fases) values ($1, 'Hidráulica', 20, 30000,
+     jsonb_build_array(jsonb_build_object('inicio', app.hoje() + 10, 'fim', app.hoje() + 19),
+                       jsonb_build_object('inicio', app.hoje() - 30, 'fim', app.hoje() - 21)))
+   returning id, data_inicio_prevista = app.hoje() - 30 and data_fim_prevista = app.hoje() + 19 as envelope,
+             (fases->0->>'inicio')::date = app.hoje() - 30 as ordenada`, [OB]));
+check("0006 fases: envelope preenchido e fases ordenadas", hid.rows[0].envelope && hid.rows[0].ordenada);
+const vHid = await como(U.cliA, () => db.query(`select avanco_esperado, situacao_prazo from vw_etapas_consolidadas where etapa_id = $1`, [hid.rows[0].id]));
+check("0006 fases: esperado conta só os dias das fases (10 de 20 = 50%)", Number(vHid.rows[0].avanco_esperado) === 50, JSON.stringify(vHid.rows[0]));
+const uma = await como(U.adminA, () => db.query(
+  `update etapas set fases = jsonb_build_array(jsonb_build_object('inicio', app.hoje(), 'fim', app.hoje() + 9))
+    where id = $1 returning fases is null as virou_janela, data_inicio_prevista = app.hoje() as ini`, [hid.rows[0].id]));
+check("0006 fases: uma fase só vira janela comum", uma.rows[0].virou_janela && uma.rows[0].ini);
+await deveFalhar("0006 fases: fases sobrepostas são recusadas", () => como(U.adminA, () => db.query(
+  `update etapas set fases = jsonb_build_array(jsonb_build_object('inicio', app.hoje(), 'fim', app.hoje() + 9),
+                                               jsonb_build_object('inicio', app.hoje() + 5, 'fim', app.hoje() + 20)) where id = $1`, [hid.rows[0].id])));
+await deveFalhar("0006 fases: fim antes do início é recusado", () => como(U.adminA, () => db.query(
+  `update etapas set fases = jsonb_build_array(jsonb_build_object('inicio', app.hoje(), 'fim', app.hoje() - 1),
+                                               jsonb_build_object('inicio', app.hoje() + 5, 'fim', app.hoje() + 20)) where id = $1`, [hid.rows[0].id])));
+const loc = await como(U.adminA, () => db.query(
+  `insert into etapas (obra_id, nome, ordem, obra_toda) values ($1, 'Locação de equipamentos', 21, true) returning id`, [OB]));
+const semEntrega = await db.query(`select avanco_esperado from vw_etapas_consolidadas where etapa_id = $1`, [loc.rows[0].id]);
+check("0006 obra toda: sem entrega prevista fica sem prazo", semEntrega.rows[0].avanco_esperado === null);
+await db.query(`update obras set data_entrega_prevista = app.hoje() + 29 where id = $1`, [OB]);
+const comEntrega = await db.query(`select avanco_esperado, data_inicio_prevista = app.hoje() - 30 as ini from vw_etapas_consolidadas where etapa_id = $1`, [loc.rows[0].id]);
+check("0006 obra toda: acompanha as datas da obra (30 de 60 = 50%)", Number(comEntrega.rows[0].avanco_esperado) === 50 && comEntrega.rows[0].ini, JSON.stringify(comEntrega.rows[0]));
 
 const anon = await db.exec(`set role anon;`).then(() => db.query(`select count(*) from obras`)).then(() => "leu", () => "negado").finally(() => db.exec("reset role"));
 check("anon não lê nada", anon === "negado");

@@ -2,6 +2,8 @@
 const CONHECIDOS: [string, string][] = [
   ["etapas_nome_uk", "Já existe uma etapa com esse nome nesta obra."],
   ["etapas_datas_ck", "O fim previsto da etapa não pode ser antes do início."],
+  ["as fases não podem se sobrepor", "As fases de uma etapa não podem se sobrepor: cada uma começa depois que a anterior termina."],
+  ["cada fase precisa de início e fim", "Cada fase precisa de início e fim, com o fim depois do início."],
   ["obras_datas_ck", "A entrega prevista não pode ser antes do início da obra."],
   ["obras_uf_ck", "UF deve ter 2 letras (ex.: MG)."],
   ["lancamentos_etapa_fk", "Esta etapa tem lançamentos. Mova ou exclua os lançamentos antes de remover a etapa."],

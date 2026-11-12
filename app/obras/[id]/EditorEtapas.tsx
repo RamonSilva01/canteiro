@@ -15,7 +15,83 @@ export type EtapaEditavel = {
   orcamento_referencia: number;
   data_inicio_prevista: string | null;
   data_fim_prevista: string | null;
+  fases: { inicio: string; fim: string }[] | null;
+  obra_toda: boolean;
 };
+
+type Periodo = { k: number; inicio: string; fim: string };
+
+// Período previsto da etapa: uma janela, várias fases (hidráulica no início, meio e fim)
+// ou a obra toda (mão de obra, locação). O servidor guarda 2+ períodos como fases.
+function Periodos({ etapa }: { etapa: EtapaEditavel }) {
+  const id = etapa.etapa_id;
+  const iniciais = etapa.fases?.length
+    ? etapa.fases
+    : [{ inicio: etapa.data_inicio_prevista ?? "", fim: etapa.data_fim_prevista ?? "" }];
+  const [periodos, setPeriodos] = useState<Periodo[]>(iniciais.map((p, k) => ({ k, inicio: p.inicio ?? "", fim: p.fim ?? "" })));
+  const [toda, setToda] = useState(etapa.obra_toda);
+  const [proximo, setProximo] = useState(iniciais.length);
+
+  const mudar = (k: number, campo: "inicio" | "fim", valor: string) =>
+    setPeriodos((ps) => ps.map((p) => (p.k === k ? { ...p, [campo]: valor } : p)));
+
+  return (
+    <div className="col-span-2 md:col-span-1 flex flex-col gap-1">
+      <div className={toda ? "hidden" : "flex flex-col gap-1"}>
+        {periodos.map((p, i) => (
+          <div key={p.k} className="flex items-center gap-1">
+            <input
+              name={`ini_${id}`}
+              type="date"
+              value={p.inicio}
+              onChange={(ev) => mudar(p.k, "inicio", ev.target.value)}
+              className={inputPequeno}
+              aria-label={periodos.length > 1 ? `Início da ${i + 1}ª fase` : "Início previsto"}
+            />
+            <input
+              name={`fim_${id}`}
+              type="date"
+              value={p.fim}
+              onChange={(ev) => mudar(p.k, "fim", ev.target.value)}
+              className={inputPequeno}
+              aria-label={periodos.length > 1 ? `Fim da ${i + 1}ª fase` : "Fim previsto"}
+            />
+            {periodos.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setPeriodos((ps) => ps.filter((x) => x.k !== p.k))}
+                aria-label={`Tirar a ${i + 1}ª fase`}
+                title="Tirar esta fase"
+                className="px-1 text-stone-400 hover:text-red-600"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {toda && <p className="text-xs text-stone-500 py-1">Acompanha o início e a entrega prevista da obra.</p>}
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        {!toda && (
+          <button
+            type="button"
+            onClick={() => {
+              setPeriodos((ps) => [...ps, { k: proximo, inicio: "", fim: "" }]);
+              setProximo((n) => n + 1);
+            }}
+            className="text-stone-600 underline"
+          >
+            + fase
+          </button>
+        )}
+        <label className="flex items-center gap-1 text-stone-600">
+          <input type="checkbox" name={`toda_${id}`} checked={toda} onChange={(ev) => setToda(ev.target.checked)} />
+          obra toda
+        </label>
+      </div>
+    </div>
+  );
+}
 
 function Linha({ obraId, etapa, posicao }: { obraId: string; etapa: EtapaEditavel; posicao: number }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: etapa.etapa_id });
@@ -25,7 +101,7 @@ function Linha({ obraId, etapa, posicao }: { obraId: string; etapa: EtapaEditave
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={`grid grid-cols-2 md:grid-cols-[3.5rem_1fr_9rem_9rem_9rem_5rem] gap-2 border-b border-stone-100 pb-2 bg-white ${
+      className={`grid grid-cols-2 md:grid-cols-[3.5rem_1fr_9rem_minmax(0,20rem)_5rem] gap-2 border-b border-stone-100 pb-2 bg-white ${
         isDragging ? "relative z-10 shadow-md rounded-md" : ""
       }`}
     >
@@ -52,8 +128,7 @@ function Linha({ obraId, etapa, posicao }: { obraId: string; etapa: EtapaEditave
         className={`${inputPequeno} text-right num`}
         aria-label="Orçamento"
       />
-      <input name={`ini_${id}`} type="date" defaultValue={etapa.data_inicio_prevista ?? ""} className={inputPequeno} aria-label="Início previsto" />
-      <input name={`fim_${id}`} type="date" defaultValue={etapa.data_fim_prevista ?? ""} className={inputPequeno} aria-label="Fim previsto" />
+      <Periodos etapa={etapa} />
       <BotaoConfirmar
         pergunta={`Remover a etapa "${etapa.nome}"? Etapa com lançamentos não pode ser removida.`}
         formAction={removerEtapa.bind(null, obraId, id)}
@@ -104,18 +179,17 @@ export function EditorEtapas({ obraId, etapas }: { obraId: string; etapas: Etapa
         {salvando ? "Salvando a nova ordem..." : "Arraste pela alça ⠿ para mudar a posição. A ordem é salva ao soltar."}
       </p>
       {erro && <p className="bg-red-50 text-red-700 text-sm rounded-md px-4 py-2">{erro}</p>}
-      <div className="hidden md:grid grid-cols-[3.5rem_1fr_9rem_9rem_9rem_5rem] gap-2 text-xs text-stone-500">
+      <div className="hidden md:grid grid-cols-[3.5rem_1fr_9rem_minmax(0,20rem)_5rem] gap-2 text-xs text-stone-500">
         <span>Ordem</span>
         <span>Nome</span>
         <span>Orçamento (R$)</span>
-        <span>Início previsto</span>
-        <span>Fim previsto</span>
+        <span>Período previsto (início e fim)</span>
         <span />
       </div>
       <DndContext id={idDnd} sensors={sensores} collisionDetection={closestCenter} modifiers={[restrictToVerticalAxis]} onDragEnd={soltar}>
         <SortableContext items={lista.map((e) => e.etapa_id)} strategy={verticalListSortingStrategy}>
           {lista.map((e, i) => (
-            <Linha key={e.etapa_id} obraId={obraId} etapa={e} posicao={i + 1} />
+            <Linha key={`${e.etapa_id}|${e.obra_toda}|${e.data_inicio_prevista}|${e.data_fim_prevista}|${JSON.stringify(e.fases)}`} obraId={obraId} etapa={e} posicao={i + 1} />
           ))}
         </SortableContext>
       </DndContext>

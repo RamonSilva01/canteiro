@@ -18,18 +18,27 @@ export async function salvarEtapas(obraId: string, fd: FormData) {
 
   const ids = fd.getAll("id").map(String);
   const resultados = await Promise.all(
-    ids.map((id) =>
-      supabase
+    ids.map((id) => {
+      // Um par de datas por fase; pares vazios são ignorados.
+      const fins = fd.getAll(`fim_${id}`).map(texto);
+      const periodos = fd
+        .getAll(`ini_${id}`)
+        .map((v, i) => ({ inicio: texto(v), fim: fins[i] ?? null }))
+        .filter((p) => p.inicio || p.fim);
+      const fases = periodos.length > 1 ? periodos : null; // o banco valida, ordena e preenche o envelope
+      return supabase
         .from("etapas")
         .update({
           nome: texto(fd.get(`nome_${id}`)),
           orcamento_referencia: numero(fd.get(`orc_${id}`)) ?? 0,
-          data_inicio_prevista: texto(fd.get(`ini_${id}`)),
-          data_fim_prevista: texto(fd.get(`fim_${id}`)),
+          data_inicio_prevista: periodos[0]?.inicio ?? null,
+          data_fim_prevista: periodos.at(-1)?.fim ?? null,
+          fases,
+          obra_toda: fd.get(`toda_${id}`) === "on",
         })
         .eq("id", id)
-        .eq("obra_id", obraId),
-    ),
+        .eq("obra_id", obraId);
+    }),
   );
   voltar(obraId, resultados.find((r) => r.error)?.error, "?editar=1&etapas_salvas=1");
 }
